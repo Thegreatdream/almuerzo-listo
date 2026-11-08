@@ -1,0 +1,7 @@
+{
+  "cleanUrls": true,
+  "rewrites": [
+    { "source": "/panel", "destination": "/panel.html" },
+    { "source": "/:slug([a-z0-9-]+)", "destination": "/menu.html" }
+  ]
+}

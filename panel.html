@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Panel · Almuerzo Listo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Caveat:wght@600;700&family=Nunito:wght@400;600;700;800&display=swap">
+<link rel="stylesheet" href="/styles.css">
+<style>
+.wrap{max-width:1100px;margin:0 auto;display:flex;flex-direction:column;gap:16px}
+header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px}
+.tabs{display:flex;flex-wrap:wrap;background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:3px}
+.tabs button{border:0;background:none;padding:7px 14px;border-radius:999px;color:var(--muted);font-weight:700;font-size:14px}
+.tabs button[aria-selected="true"]{background:var(--ink);color:var(--bg)}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.card h2{margin:0;font-size:18px;font-weight:800}
+.narrow{max-width:460px;margin:24px auto;width:100%}
+.stat{display:flex;flex-wrap:wrap;gap:22px}
+.stat div{display:flex;flex-direction:column}
+.stat b{font-size:26px;font-weight:800}
+.stat span{font-size:12px;color:var(--muted)}
+.cols{display:grid;grid-template-columns:1fr;gap:12px}
+@media (min-width:820px){.cols{grid-template-columns:repeat(3,1fr);align-items:start}}
+.col{display:flex;flex-direction:column;gap:8px;min-width:0}
+.col h3{margin:0;font-size:13px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);display:flex;justify-content:space-between}
+.ord{background:var(--surface);border:1px solid var(--line);border-left:5px solid var(--line);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:6px}
+.ord.nuevo{border-left-color:var(--accent)}
+.ord.preparando{border-left-color:var(--warn)}
+.ord.listo{border-left-color:var(--ok)}
+.ord .top{display:flex;align-items:baseline;gap:8px}
+.ord .n{font-family:var(--display);font-size:34px;font-weight:700;line-height:1}
+.ord .who{font-weight:800;overflow-wrap:anywhere}
+.ord .h{margin-left:auto;font-size:12px;color:var(--muted);text-align:right}
+.ord .det{font-size:14px}
+.ord .act{display:flex;gap:6px;flex-wrap:wrap}
+.empty{color:var(--muted);font-size:14px;padding:6px 0}
+.edsec{border:1px solid var(--line);border-radius:12px;padding:10px;display:flex;flex-direction:column;gap:6px}
+.edsec .row{display:flex;gap:6px}
+.x{border:0;background:none;color:var(--muted);font-size:18px;line-height:1;padding:4px 8px;border-radius:6px}
+.actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.toast{font-size:13px;font-weight:700;color:var(--ok)}
+.two{display:grid;grid-template-columns:1fr;gap:16px}
+@media (min-width:820px){.two{grid-template-columns:1fr 1fr;align-items:start}}
+.link{font-weight:800;font-size:17px;overflow-wrap:anywhere}
+#qr{background:#fff;padding:12px;border-radius:12px;width:max-content;max-width:100%}
+pre.copy{white-space:pre-wrap;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px;font:inherit;font-size:14px;margin:0}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <a class="brand" href="/">Almuerzo Listo</a>
+    <nav class="tabs" role="tablist" id="tabs" hidden>
+      <button role="tab" data-v="pedidos" aria-selected="true">Pedidos</button>
+      <button role="tab" data-v="menu" aria-selected="false">Menú de hoy</button>
+      <button role="tab" data-v="compartir" aria-selected="false">Compartir</button>
+      <button role="tab" data-v="datos" aria-selected="false">Datos</button>
+    </nav>
+  </header>
+  <div class="note" id="status"></div>
+  <div id="app"></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="/config.js"></script>
+<script src="/common.js"></script>
+<script>
+const { el, fmt, toNum, hoy, fechaTxt, slugify } = AL;
+const app = document.getElementById("app");
+const status = t => { const s=document.getElementById("status"); s.textContent=t||""; };
+let user=null, rest=null, view="pedidos", orders=[], channel=null, sound=false, audioCtx=null;
+
+/* ---------- Inicio y sesión ---------- */
+async function start(){
+  if (AL.sinConfig()){ app.replaceChildren(el("div",{class:"card narrow"},[el("h2",{text:"Falta configurar"}),el("p",{text:"Pegue la URL y la llave de Supabase en config.js."})])); return; }
+  const { data:{ session } } = await sb.auth.getSession();
+  sb.auth.onAuthStateChange((_e, s)=>{ if (s?.user && !user){ user=s.user; loadRest(); } });
+  if (!session) return loginView();
+  user = session.user; loadRest();
+}
+
+function loginView(){
+  const email = el("input",{type:"email",id:"email",required:true,autocomplete:"email",placeholder:"correo@ejemplo.com"});
+  const note = el("div",{class:"note"});
+  app.replaceChildren(el("form",{class:"card narrow",onsubmit:async e=>{
+    e.preventDefault(); note.textContent="Enviando…";
+    const { error } = await sb.auth.signInWithOtp({ email: email.value.trim(), options:{ emailRedirectTo: location.origin + "/panel" } });
+    note.textContent = error ? "No se pudo enviar: " + error.message : "Listo. Abra su correo y toque el enlace para entrar.";
+  }},[
+    el("h2",{text:"Entrar al panel del restaurante"}),
+    el("p",{class:"note",text:"Le enviamos un enlace a su correo. Sin contraseñas."}),
+    el("label",{class:"f"},["Correo",email]),
+    el("button",{class:"btn btn-primary",type:"submit",text:"Enviarme el enlace"}),
+    note
+  ]));
+}
+
+async function loadRest(){
+  status("Cargando…");
+  const { data, error } = await sb.from("restaurants").select("*").eq("owner", user.id).maybeSingle();
+  status("");
+  if (error){ status("No se pudo cargar su restaurante: " + error.message); return; }
+  if (!data) return onboardingView();
+  rest = data;
+  document.getElementById("tabs").hidden = false;
+  subscribeOrders();
+  show(view);
+}
+
+function onboardingView(){
+  const nombre = el("input",{id:"o-nombre",required:true,maxlength:"80",placeholder:"Ej. Donde Doña Rosa"});
+  const slug = el("input",{id:"o-slug",required:true,maxlength:"40",pattern:"[a-z0-9]+(-[a-z0-9]+)*"});
+  const wa = el("input",{id:"o-wa",type:"tel",placeholder:"Ej. 300 123 4567"});
+  const dir = el("input",{id:"o-dir",maxlength:"120",placeholder:"Ej. Cra 7 # 45-12 · 11:30 a. m. a 3:00 p. m."});
+  const prev = el("div",{class:"note"});
+  let tocado=false;
+  nombre.addEventListener("input",()=>{ if(!tocado) slug.value=slugify(nombre.value); prev.textContent=location.origin+"/"+slug.value; });
+  slug.addEventListener("input",()=>{ tocado=true; slug.value=slugify(slug.value); prev.textContent=location.origin+"/"+slug.value; });
+  const note = el("div",{class:"note warn"});
+  app.replaceChildren(el("form",{class:"card narrow",onsubmit:async e=>{
+    e.preventDefault(); note.textContent="";
+    const { data, error } = await sb.from("restaurants").insert({ nombre:nombre.value.trim(), slug:slug.value, whatsapp:wa.value.trim(), direccion:dir.value.trim() }).select().single();
+    if (error){ note.textContent = error.code==="23505" ? "Ese enlace ya está en uso. Pruebe otro." : "No se pudo crear: " + error.message; return; }
+    rest = data; document.getElementById("tabs").hidden=false; subscribeOrders(); show("menu");
+  }},[
+    el("h2",{text:"Cree su restaurante"}),
+    el("label",{class:"f"},["Nombre del restaurante",nombre]),
+    el("label",{class:"f"},["Enlace para sus clientes",slug,prev]),
+    el("label",{class:"f"},["WhatsApp del restaurante",wa]),
+    el("label",{class:"f"},["Dirección y horario",dir]),
+    el("button",{class:"btn btn-primary",type:"submit",text:"Crear restaurante"}),
+    note
+  ]));
+}
+
+/* ---------- Pestañas ---------- */
+document.getElementById("tabs").addEventListener("click",e=>{ const b=e.target.closest("[data-v]"); if(b) show(b.dataset.v); });
+function show(v){
+  view=v;
+  for (const b of document.querySelectorAll("#tabs [data-v]")) b.setAttribute("aria-selected", b.dataset.v===v ? "true":"false");
+  ({pedidos:pedidosView, menu:menuView, compartir:compartirView, datos:datosView})[v]();
+}
+
+/* ---------- Pedidos en vivo ---------- */
+async function loadOrders(){
+  const { data, error } = await sb.from("orders").select("*").eq("restaurant_id", rest.id).eq("fecha", hoy()).order("numero");
+  if (!error) orders = data;
+  if (view==="pedidos") pedidosView();
+}
+function subscribeOrders(){
+  loadOrders();
+  if (channel) sb.removeChannel(channel);
+  channel = sb.channel("pedidos-"+rest.id)
+    .on("postgres_changes",{ event:"*", schema:"public", table:"orders", filter:"restaurant_id=eq."+rest.id }, payload=>{
+      if (payload.eventType==="INSERT" && payload.new.fecha===hoy()){ orders.push(payload.new); beep(); }
+      else if (payload.eventType==="UPDATE"){ const i=orders.findIndex(o=>o.id===payload.new.id); if(i>=0) orders[i]=payload.new; }
+      orders.sort((a,b)=>a.numero-b.numero);
+      if (view==="pedidos") pedidosView();
+    }).subscribe();
+  // Respaldo por si se cae la conexión en vivo
+  setInterval(loadOrders, 60000);
+}
+function beep(){
+  if (!sound || !audioCtx) return;
+  const o=audioCtx.createOscillator(), g=audioCtx.createGain();
+  o.frequency.value=880; o.connect(g); g.connect(audioCtx.destination);
+  g.gain.setValueAtTime(.25,audioCtx.currentTime); g.gain.exponentialRampToValueAtTime(.001,audioCtx.currentTime+.6);
+  o.start(); o.stop(audioCtx.currentTime+.6);
+}
+async function setEstado(o, estado){
+  const { error } = await sb.from("orders").update({ estado }).eq("id", o.id);
+  if (error) status("No se pudo cambiar el pedido #"+o.numero+". Intente de nuevo.");
+}
+function pedidosView(){
+  const vivos = orders.filter(o=>o.estado!=="cancelado");
+  const stats = el("div",{class:"stat"},[
+    el("div",{},[el("b",{class:"num",text:String(vivos.length)}),el("span",{text:"pedidos hoy"})]),
+    el("div",{},[el("b",{class:"num",text:String(vivos.reduce((s,o)=>s+o.cantidad,0))}),el("span",{text:"almuerzos"})]),
+    el("div",{},[el("b",{class:"num",text:fmt(vivos.reduce((s,o)=>s+o.total,0))}),el("span",{text:"vendido"})])
+  ]);
+  const sbtn = el("button",{class:"btn btn-sm",type:"button",text:sound?"Sonido activado":"Activar sonido de pedidos nuevos",onclick:()=>{
+    sound=!sound; if(sound&&!audioCtx){ try{ audioCtx=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} }
+    if(sound) beep(); pedidosView();
+  }});
+  const cols = [["nuevo","Nuevos"],["preparando","Preparando"],["listo","Listos para entregar"]].map(([k,t])=>{
+    const list = orders.filter(o=>o.estado===k);
+    const c = el("div",{class:"col"},[el("h3",{},[el("span",{text:t}),el("span",{class:"num",text:String(list.length)})])]);
+    if (!list.length) c.append(el("div",{class:"empty",text: k==="nuevo" ? "Aquí entran los pedidos nuevos." : "—"}));
+    for (const o of list) c.append(orderCard(o));
+    return c;
+  });
+  const entregados = orders.filter(o=>o.estado==="entregado").length;
+  app.replaceChildren(
+    el("div",{class:"card"},[el("div",{class:"actions",style:"justify-content:space-between"},[stats,sbtn])]),
+    el("div",{class:"cols"},cols),
+    el("div",{class:"note",text: entregados ? `${entregados} entregados hoy.` : ""})
+  );
+}
+function orderCard(o){
+  const det = [ ...Object.values(o.eleccion||{}), ...((o.extras||[]).length ? ["+ "+o.extras.join(", ")] : []) ].join(" · ");
+  const next = { nuevo:["preparando","Preparar"], preparando:["listo","Marcar listo"], listo:["entregado","Entregado"] }[o.estado];
+  const hora = new Date(o.created_at).toLocaleTimeString("es-CO",{hour:"numeric",minute:"2-digit",timeZone:"America/Bogota"});
+  return el("article",{class:"ord "+o.estado},[
+    el("div",{class:"top"},[el("span",{class:"n num",text:"#"+o.numero}),el("span",{class:"who",text:`${o.cantidad}× ${o.cliente}`}),el("span",{class:"h",text:`${o.hora||""}\n${hora}`})]),
+    el("div",{class:"det",text:det||"Menú del día"}),
+    el("div",{class:"note num",text:fmt(o.total)+(o.telefono?" · "+o.telefono:"")}),
+    el("div",{class:"act"},[
+      next ? el("button",{class:"btn btn-sm "+(o.estado==="preparando"?"btn-ok":"btn-primary"),type:"button",text:next[1],onclick:()=>setEstado(o,next[0])}) : null,
+      o.estado==="nuevo" ? el("button",{class:"btn btn-sm",type:"button",text:"Cancelar",onclick:()=>setEstado(o,"cancelado")}) : null
+    ])
+  ]);
+}
+
+/* ---------- Menú de hoy ---------- */
+let draft=null;
+async function menuView(){
+  app.replaceChildren(el("div",{class:"note",text:"Cargando menú…"}));
+  const { data } = await sb.from("menus").select("fecha,data").eq("restaurant_id",rest.id).order("fecha",{ascending:false}).limit(1);
+  const last = data && data[0];
+  const esHoy = last && last.fecha===hoy();
+  draft = JSON.parse(JSON.stringify(last ? last.data : {precio:0,secciones:[{titulo:"Sopa",opciones:[]},{titulo:"Principio",opciones:[]},{titulo:"Proteína",opciones:[]},{titulo:"Acompañantes",opciones:[]},{titulo:"Bebida",opciones:[]}],extras:[],nota:""}));
+  const precio = el("input",{id:"e-precio",inputmode:"numeric",value:draft.precio?(+draft.precio).toLocaleString("es-CO"):"",placeholder:"Ej. 15.000"});
+  precio.addEventListener("input",()=>{ const n=toNum(precio.value); precio.value=n?n.toLocaleString("es-CO"):""; });
+  const secs = el("div",{style:"display:flex;flex-direction:column;gap:8px"});
+  const renderSecs = ()=>{
+    secs.replaceChildren(...draft.secciones.map((s,i)=>{
+      const t = el("input",{value:s.titulo,"aria-label":"Nombre de la sección"}); t.addEventListener("input",()=>s.titulo=t.value);
+      const ta = el("textarea",{rows:"2",placeholder:"Una opción por línea. Si es una sola, se muestra como incluida.","aria-label":"Opciones"}); ta.value=(s.opciones||[]).join("\n");
+      ta.addEventListener("input",()=>s.opciones=ta.value.split("\n").map(v=>v.trim()).filter(Boolean));
+      return el("div",{class:"edsec"},[el("div",{class:"row"},[t,el("button",{class:"x",type:"button",text:"×","aria-label":"Quitar sección",onclick:()=>{draft.secciones.splice(i,1);renderSecs();}})]),ta]);
+    }));
+  };
+  renderSecs();
+  const extras = el("textarea",{rows:"3",placeholder:"Huevo frito - 2000\nPorción de papas - 3000"}); extras.value=(draft.extras||[]).map(x=>x.nombre+(x.precio?" - "+x.precio:"")).join("\n");
+  const nota = el("input",{value:draft.nota||"",placeholder:"Ej. Hasta agotar existencias"});
+  const toast = el("span",{class:"toast","aria-live":"polite"});
+  const read = ()=>{
+    draft.precio=toNum(precio.value);
+    draft.extras=extras.value.split("\n").map(l=>l.trim()).filter(Boolean).map(l=>{const m=l.match(/^(.*?)[\s\-–:$]+([\d.,]+)\s*$/);return m?{nombre:m[1].trim(),precio:toNum(m[2])}:{nombre:l,precio:0};});
+    draft.nota=nota.value.trim();
+    draft.secciones=draft.secciones.filter(s=>s.titulo.trim()&&(s.opciones||[]).length);
+    return draft;
+  };
+  app.replaceChildren(el("div",{class:"card",style:"max-width:720px"},[
+    el("h2",{text:"Menú de hoy · "+fechaTxt(hoy())}),
+    el("div",{class:"note",text: esHoy ? "Este es el menú publicado hoy. Puede cambiarlo y volver a publicar." : last ? "Cargamos su último menú ("+fechaTxt(last.fecha)+") para que solo cambie lo distinto." : "Escriba el menú de hoy."}),
+    el("label",{class:"f"},["Precio del almuerzo",precio]),
+    secs,
+    el("div",{},[el("button",{class:"btn btn-sm",type:"button",text:"+ Agregar sección",onclick:()=>{draft.secciones.push({titulo:"Nueva sección",opciones:[]});renderSecs();}})]),
+    el("label",{class:"f"},["Adicionales (uno por línea: nombre - precio)",extras]),
+    el("label",{class:"f"},["Nota para los clientes",nota]),
+    el("div",{class:"actions"},[
+      el("button",{class:"btn btn-primary",type:"button",text:"Publicar menú de hoy",onclick:async()=>{
+        const m=read(); if(!m.secciones.length){toast.textContent="Agregue al menos una sección con opciones.";return;}
+        const { error } = await sb.from("menus").upsert({ restaurant_id:rest.id, fecha:hoy(), data:m, updated_at:new Date().toISOString() });
+        toast.textContent = error ? "No se pudo publicar: "+error.message : "Publicado. Sus clientes ya lo ven.";
+        renderSecs();
+      }}),
+      el("a",{class:"btn",href:"/"+rest.slug,target:"_blank",rel:"noopener",text:"Ver como cliente"}),
+      toast
+    ])
+  ]));
+}
+
+/* ---------- Compartir ---------- */
+function copyBtn(text, label){
+  const b = el("button",{class:"btn btn-sm",type:"button",text:label,onclick:async()=>{
+    try{ await navigator.clipboard.writeText(text); b.textContent="Copiado"; }catch(e){ b.textContent="Selecciónelo y cópielo"; }
+    setTimeout(()=>b.textContent=label,2500);
+  }});
+  return b;
+}
+function compartirView(){
+  const url = location.origin + "/" + rest.slug;
+  const bienvenida = `¡Hola! Bienvenido a ${rest.nombre}. Vea el menú de hoy y haga su pedido aquí: ${url}\nLe avisamos cuando esté listo.`;
+  const rapida = `Menú de hoy y pedidos: ${url}`;
+  const qr = el("div",{id:"qr"});
+  app.replaceChildren(el("div",{class:"two"},[
+    el("div",{class:"card"},[
+      el("h2",{text:"Su enlace"}),
+      el("div",{class:"link",text:url}),
+      el("div",{class:"actions"},[copyBtn(url,"Copiar enlace"),el("a",{class:"btn btn-sm",href:url,target:"_blank",rel:"noopener",text:"Abrir"})]),
+      el("div",{class:"note",text:"Código QR para imprimir y poner en las mesas y la caja:"}),
+      qr
+    ]),
+    el("div",{class:"card"},[
+      el("h2",{text:"Respuesta automática en WhatsApp Business"}),
+      el("div",{class:"note",text:"En WhatsApp Business: ⋮ → Herramientas para la empresa → Mensaje de bienvenida. Actívelo y pegue este texto:"}),
+      el("pre",{class:"copy",text:bienvenida}),
+      copyBtn(bienvenida,"Copiar mensaje de bienvenida"),
+      el("div",{class:"note",text:"Para clientes frecuentes, cree una respuesta rápida con el atajo /menu (Herramientas para la empresa → Respuestas rápidas) con este texto:"}),
+      el("pre",{class:"copy",text:rapida}),
+      copyBtn(rapida,"Copiar respuesta rápida")
+    ])
+  ]));
+  try{ new QRCode(qr,{text:url,width:180,height:180,colorDark:"#22392E",colorLight:"#ffffff"}); }catch(e){ qr.textContent="No se pudo generar el QR."; }
+}
+
+/* ---------- Datos ---------- */
+function datosView(){
+  const nombre = el("input",{value:rest.nombre,maxlength:"80"});
+  const wa = el("input",{type:"tel",value:rest.whatsapp||""});
+  const dir = el("input",{value:rest.direccion||"",maxlength:"120"});
+  const toast = el("span",{class:"toast"});
+  app.replaceChildren(el("div",{class:"card",style:"max-width:560px"},[
+    el("h2",{text:"Datos del restaurante"}),
+    el("label",{class:"f"},["Nombre",nombre]),
+    el("label",{class:"f"},["WhatsApp",wa]),
+    el("label",{class:"f"},["Dirección y horario",dir]),
+    el("div",{class:"note",text:"Enlace: "+location.origin+"/"+rest.slug}),
+    el("div",{class:"actions"},[
+      el("button",{class:"btn btn-primary",type:"button",text:"Guardar",onclick:async()=>{
+        const upd={nombre:nombre.value.trim(),whatsapp:wa.value.trim(),direccion:dir.value.trim()};
+        const { error } = await sb.from("restaurants").update(upd).eq("id",rest.id);
+        if(!error) Object.assign(rest,upd);
+        toast.textContent = error ? "No se pudo guardar: "+error.message : "Guardado.";
+      }}),
+      el("button",{class:"btn",type:"button",text:"Cerrar sesión",onclick:async()=>{ await sb.auth.signOut(); location.reload(); }}),
+      toast
+    ])
+  ]));
+}
+
+start();
+</script>
+</body>
+</html>

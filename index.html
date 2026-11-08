@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Almuerzo Listo · El menú del día y los pedidos, sin complicarse</title>
+<meta name="description" content="Publique su menú del día en un enlace, reciba los pedidos en orden y deje de responder chats en hora pico.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Caveat:wght@600;700&family=Nunito:wght@400;600;700;800&display=swap">
+<link rel="stylesheet" href="/styles.css">
+<style>
+.wrap{max-width:1000px;margin:0 auto;display:flex;flex-direction:column;gap:40px}
+header{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.hero{display:grid;grid-template-columns:1fr;gap:24px;align-items:center}
+@media (min-width:860px){.hero{grid-template-columns:1.1fr 1fr}}
+h1{font-size:clamp(30px,6vw,46px);line-height:1.05;margin:0 0 12px;font-weight:800;letter-spacing:-.02em;text-wrap:balance}
+h1 em{font-family:var(--display);font-style:normal;color:var(--accent);font-size:1.15em}
+.lead{font-size:18px;color:var(--muted);max-width:52ch;margin:0 0 20px}
+.steps{display:grid;grid-template-columns:1fr;gap:14px}
+@media (min-width:760px){.steps{grid-template-columns:repeat(3,1fr)}}
+.step{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:16px}
+.step b{font-family:var(--display);font-size:34px;color:var(--accent);line-height:1}
+.step h3{margin:6px 0 4px;font-size:17px}
+.step p{margin:0;color:var(--muted)}
+.mini .board{max-width:340px;transform:rotate(-1.5deg)}
+.mini .sec h3{font-size:22px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <a class="brand" href="/">Almuerzo Listo</a>
+    <a class="btn" href="/panel">Soy restaurante · Entrar</a>
+  </header>
+
+  <section class="hero">
+    <div>
+      <h1>Su menú del día, en un enlace. <em>Los pedidos, en orden.</em></h1>
+      <p class="lead">Publique el corrientazo de hoy en un minuto. Sus clientes eligen sopa, principio y proteína desde el celular, y el pedido le llega numerado al panel. Sin comisiones por pedido y sin contestar chats en hora pico.</p>
+      <a class="btn btn-primary" href="/panel">Crear mi restaurante</a>
+    </div>
+    <div class="mini" aria-hidden="true">
+      <div class="board">
+        <div class="rn" style="font-size:34px">Donde Doña Rosa</div>
+        <div class="today"><span class="t">Hoy</span><span class="p">$15.000</span></div>
+        <div class="sec"><h3>Principio</h3><div class="chips"><label class="chip"><input type="radio" checked><span>Fríjoles</span></label><label class="chip"><input type="radio"><span>Lentejas</span></label></div></div>
+        <div class="sec"><h3>Proteína</h3><div class="chips"><label class="chip"><input type="radio"><span>Carne asada</span></label><label class="chip"><input type="radio" checked><span>Pechuga</span></label><label class="chip"><input type="radio"><span>Cerdo</span></label></div></div>
+        <div class="ticket"><div class="n" style="font-size:56px">#7</div><span class="st">Preparando</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="steps">
+    <div class="step"><b>1</b><h3>Publique el menú</h3><p>Cada mañana cambia solo lo distinto y toca Publicar.</p></div>
+    <div class="step"><b>2</b><h3>Comparta su enlace</h3><p>En WhatsApp, en sus estados y con un QR en la mesa.</p></div>
+    <div class="step"><b>3</b><h3>Reciba en orden</h3><p>Cada pedido llega con número. El cliente ve cuándo está listo.</p></div>
+  </section>
+</div>
+</body>
+</html>

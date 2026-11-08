@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Menú de hoy · Almuerzo Listo</title>
+<meta name="theme-color" content="#22392E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Caveat:wght@600;700&family=Nunito:wght@400;600;700;800&display=swap">
+<link rel="stylesheet" href="/styles.css">
+<style>body{background:var(--board-2)} .foot{text-align:center;margin-top:18px;font-size:12px;color:var(--chalk-dim)} .foot a{color:var(--chalk-dim)}</style>
+</head>
+<body>
+<main class="board" id="board" aria-live="polite"><div class="bempty">Cargando el menú…</div></main>
+<div class="foot">Hecho con <a href="/">Almuerzo Listo</a></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script src="/config.js"></script>
+<script src="/common.js"></script>
+<script>
+const { el, fmt, hoy, fechaTxt, waNumber } = AL;
+const slug = new URLSearchParams(location.search).get("r") || location.pathname.split("/").filter(Boolean)[0] || "";
+const board = document.getElementById("board");
+const LS = "almuerzo-pedido-" + slug;
+let rest = null, menu = null, pick = {}, extrasSel = new Set(), qty = 1, pollTimer = null;
+
+function msg(text){ board.replaceChildren(el("div",{class:"bempty",text})); }
+function lsGet(){ try{ return JSON.parse(localStorage.getItem(LS)||"null"); }catch(e){ return null; } }
+function lsSet(v){ try{ v ? localStorage.setItem(LS, JSON.stringify(v)) : localStorage.removeItem(LS); }catch(e){} }
+
+async function start(){
+  if (AL.sinConfig()) return msg("Falta configurar la conexión (config.js).");
+  if (!slug) return msg("Falta el nombre del restaurante en el enlace.");
+  const { data: r, error } = await sb.from("restaurants").select("id,nombre,whatsapp,direccion,slug").eq("slug", slug).maybeSingle();
+  if (error) return msg("No pudimos cargar el menú. Revise su conexión.");
+  if (!r) return msg("No encontramos este restaurante.");
+  rest = r;
+  document.title = "Menú de hoy · " + r.nombre;
+  const { data: m } = await sb.from("menus").select("data").eq("restaurant_id", r.id).eq("fecha", hoy()).maybeSingle();
+  menu = m ? m.data : null;
+  const saved = lsGet();
+  if (saved && saved.fecha === hoy()) showTicket(saved); else render();
+}
+
+function header(){
+  const kids = [el("h1",{class:"rn",text:rest.nombre,style:"margin:0"})];
+  if (rest.direccion) kids.push(el("div",{class:"rd",text:rest.direccion}));
+  return kids;
+}
+
+function render(){
+  board.replaceChildren(...header());
+  if (!menu || !menu.secciones || !menu.secciones.length){
+    board.append(el("div",{class:"bempty",text:"El menú de hoy todavía no está publicado."}));
+    return;
+  }
+  board.append(el("div",{class:"today"},[el("span",{class:"t",text:"Hoy, "+fechaTxt(hoy())}),el("span",{class:"p num",text:menu.precio?fmt(menu.precio):""})]));
+  menu.secciones.forEach((s,i)=>{
+    const sec = el("section",{class:"sec"},[el("h3",{text:s.titulo})]);
+    const ops = (s.opciones||[]).filter(Boolean);
+    if (ops.length <= 1) sec.append(el("div",{class:"single",text:ops[0]||""}));
+    else {
+      if (!ops.includes(pick[i])) pick[i] = ops[0];
+      const chips = el("div",{class:"chips",role:"radiogroup","aria-label":s.titulo});
+      ops.forEach((o,j)=>{
+        const id = `op-${i}-${j}`;
+        const inp = el("input",{type:"radio",name:"s"+i,id,value:o,checked:pick[i]===o,onchange:()=>{pick[i]=o;updateTotal();}});
+        chips.append(el("label",{class:"chip",for:id},[inp,el("span",{text:o})]));
+      });
+      sec.append(chips);
+    }
+    board.append(sec);
+  });
+  if (menu.extras && menu.extras.length){
+    const sec = el("section",{class:"sec"},[el("h3",{text:"Adicionales"})]);
+    menu.extras.forEach((x,k)=>{
+      const id = "ex-"+k;
+      const cb = el("input",{type:"checkbox",id,checked:extrasSel.has(k),onchange:()=>{cb.checked?extrasSel.add(k):extrasSel.delete(k);updateTotal();}});
+      sec.append(el("label",{class:"extra",for:id},[cb,el("span",{text:x.nombre}),el("span",{class:"ep num",text:x.precio?"+"+fmt(x.precio):""})]));
+    });
+    board.append(sec);
+  }
+  if (menu.nota) board.append(el("div",{class:"bnote",text:menu.nota}));
+
+  const horas = ["Para comer aquí","Recoger 11:30","Recoger 12:00","Recoger 12:30","Recoger 1:00","Recoger 1:30","Recoger 2:00","Recoger 2:30"];
+  const qn = el("b",{class:"num",text:String(qty)});
+  const form = el("form",{class:"order",autocomplete:"on",onsubmit:submit},[
+    el("div",{class:"row",style:"justify-content:space-between"},[
+      el("span",{style:"font-weight:700",text:"¿Cuántos almuerzos?"}),
+      el("div",{class:"qty"},[
+        el("button",{type:"button","aria-label":"Uno menos",text:"−",onclick:()=>{qty=Math.max(1,qty-1);qn.textContent=qty;updateTotal();}}),
+        qn,
+        el("button",{type:"button","aria-label":"Uno más",text:"+",onclick:()=>{qty=Math.min(20,qty+1);qn.textContent=qty;updateTotal();}})
+      ])
+    ]),
+    el("div",{class:"row"},[
+      el("input",{id:"c-nombre",name:"name",autocomplete:"given-name",placeholder:"Su nombre",maxlength:"40",required:true,style:"flex:1 1 140px","aria-label":"Su nombre"}),
+      el("input",{id:"c-tel",name:"tel",type:"tel",autocomplete:"tel",placeholder:"Celular (opcional)",maxlength:"20",style:"flex:1 1 140px","aria-label":"Celular"})
+    ]),
+    el("select",{id:"c-hora","aria-label":"Cuándo"}, horas.map(h=>el("option",{text:h}))),
+    el("div",{class:"total"},[el("span",{text:"Total"}),el("b",{class:"num",id:"c-total"})]),
+    el("div",{id:"c-err"}),
+    el("button",{class:"go",type:"submit",id:"c-go",text:"Hacer pedido"})
+  ]);
+  board.append(form);
+  updateTotal();
+}
+
+function selection(){
+  const elec = {};
+  (menu.secciones||[]).forEach((s,i)=>{ const ops=(s.opciones||[]).filter(Boolean); if (ops.length>1) elec[s.titulo]=pick[i]; });
+  const ex = [...extrasSel].map(k=>menu.extras[k]).filter(Boolean);
+  const total = ((+menu.precio||0) + ex.reduce((s,x)=>s+(+x.precio||0),0)) * qty;
+  return { elec, ex, total };
+}
+function updateTotal(){ const t=document.getElementById("c-total"); if(t) t.textContent = fmt(selection().total); }
+
+async function submit(e){
+  e.preventDefault();
+  const go = document.getElementById("c-go"), err = document.getElementById("c-err");
+  const nombre = document.getElementById("c-nombre").value.trim();
+  if (nombre.length < 2){ err.replaceChildren(el("div",{class:"berr",text:"Escriba su nombre para el pedido."})); return; }
+  go.disabled = true; go.textContent = "Enviando…"; err.replaceChildren();
+  const s = selection();
+  const { data, error } = await sb.rpc("crear_pedido", {
+    p_slug: slug, p_cliente: nombre, p_telefono: document.getElementById("c-tel").value.trim(),
+    p_hora: document.getElementById("c-hora").value, p_cantidad: qty,
+    p_eleccion: s.elec, p_extras: s.ex.map(x=>x.nombre)
+  });
+  if (error || !data || !data[0]){
+    go.disabled = false; go.textContent = "Hacer pedido";
+    err.replaceChildren(el("div",{class:"berr",text:(error&&error.message)||"No se pudo enviar el pedido. Intente de nuevo."}));
+    return;
+  }
+  const t = { fecha: hoy(), numero: data[0].o_numero, token: data[0].o_token, total: data[0].o_total, nombre, cantidad: qty, elec: s.elec };
+  lsSet(t); showTicket(t);
+}
+
+const ESTADOS = { nuevo:"Recibido", preparando:"Preparando", listo:"¡Listo!", entregado:"Entregado", cancelado:"Cancelado" };
+function showTicket(t){
+  board.replaceChildren(...header());
+  const st = el("span",{class:"st",text:"Recibido"});
+  const n = waNumber(rest.whatsapp);
+  const kids = [
+    el("div",{class:"t",style:"font-family:var(--display);font-size:26px;color:var(--chalk)",text:"Su pedido es el"}),
+    el("div",{class:"n num",text:"#"+t.numero}),
+    st,
+    el("div",{text:`${t.cantidad} ${t.cantidad===1?"almuerzo":"almuerzos"} a nombre de ${t.nombre} · ${fmt(t.total)}`}),
+    el("div",{class:"bnote",text:"Esta pantalla se actualiza sola. Diga su número al llegar."})
+  ];
+  if (n) kids.push(el("a",{href:`https://wa.me/${n}?text=${encodeURIComponent(`Hola, hice el pedido #${t.numero} a nombre de ${t.nombre}.`)}`,target:"_blank",rel:"noopener",text:"Escribir al restaurante por WhatsApp"}));
+  kids.push(el("button",{class:"btn btn-sm",type:"button",text:"Hacer otro pedido",onclick:()=>{ clearInterval(pollTimer); lsSet(null); pick={}; extrasSel=new Set(); qty=1; render(); }}));
+  board.append(el("div",{class:"ticket"},kids));
+  const poll = async()=>{
+    const { data } = await sb.rpc("estado_pedido",{ p_token: t.token });
+    if (data && data[0]) st.textContent = ESTADOS[data[0].o_estado] || data[0].o_estado;
+    if (data && data[0] && ["entregado","cancelado"].includes(data[0].o_estado)) clearInterval(pollTimer);
+  };
+  clearInterval(pollTimer); poll(); pollTimer = setInterval(poll, 15000);
+}
+
+start();
+</script>
+</body>
+</html>
